@@ -1,0 +1,32 @@
+[package]
+name = "controller"
+version = "0.1.0"
+edition = "2021"
+default-run = "controller-api"
+
+[[bin]]
+name = "controller-api"
+path = "src/bin/controller-api.rs"
+
+[dependencies]
+# shared dependencies
+actix-web = { workspace = true }
+actix-web-httpauth = { workspace = true }
+async-trait = { workspace = true }
+async_once = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+dotenv = { workspace = true }
+env_logger = { workspace = true }
+error-chain = { workspace = true }
+fern = { workspace = true }
+futures = { workspace = true }
+lazy_static = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio ={ workspace = true }
+
+# crate dependencies
+common = { path = "../common" }
