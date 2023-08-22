@@ -1,12 +1,16 @@
 [package]
-name = "controller"
+name = "mfs"
 version = "0.1.0"
 edition = "2021"
-default-run = "controller-api"
+default-run = "master"
 
 [[bin]]
-name = "controller-api"
-path = "src/bin/controller-api.rs"
+name = "master"
+path = "src/bin/master.rs"
+
+[[bin]]
+name = "filer"
+path = "src/bin/filer.rs"
 
 [dependencies]
 # shared dependencies
@@ -23,10 +27,12 @@ fern = { workspace = true }
 futures = { workspace = true }
 lazy_static = { workspace = true }
 log = { workspace = true }
+prost = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio ={ workspace = true }
+tonic = { workspace = true }
+tokio = { workspace = true }
 
-# crate dependencies
-common = { path = "../common" }
+[build-dependencies]
+tonic-build = { workspace = true }

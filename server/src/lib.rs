@@ -1,15 +1,18 @@
 #[macro_use]
-extern crate error_chain;
+extern crate log;
 
 #[macro_use]
-pub mod macros;
+extern crate error_chain;
 
-pub mod errors;
-pub mod id;
-pub mod logger;
-pub mod version;
+pub mod core;
+pub mod filer;
+pub mod master;
 
-pub const BANNER: &str = "metal_fs";
+pub mod metalfs {
+    tonic::include_proto!("metalfs");
+}
+
+pub const BANNER: &str = "metalfs";
 
 // The name and version of this build
 pub const PKG_NAME: &str = env!("CARGO_PKG_NAME");

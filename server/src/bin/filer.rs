@@ -4,17 +4,17 @@ use clap::Parser;
 use clap::Subcommand;
 use dotenv::dotenv;
 use log::error;
+use mfs::core::version;
+use mfs::filer::config::FilerServerConfig;
+use mfs::filer::server;
+use mfs::BANNER;
 
-use common::{version, BANNER};
-use controller::config::ServerConfig;
-use controller::server;
-
-pub const LOG: &str = "metalfs::controller";
+pub const LOG: &str = "metalfs::filer";
 
 const INFO: &str = "Web server that orchestrates file-system operations and metadata.";
 
 #[derive(Debug, Parser)]
-#[clap(name = "Controller service command-line interface")]
+#[clap(name = "Master service command-line interface")]
 #[clap(about = INFO, before_help = BANNER, disable_version_flag = true, arg_required_else_help = true)]
 struct AppOptions {
     #[clap(subcommand)]
@@ -23,7 +23,7 @@ struct AppOptions {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    Server(ServerConfig),
+    Server(FilerServerConfig),
     Version,
 }
 

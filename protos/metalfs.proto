@@ -1,0 +1,146 @@
+syntax = "proto3";
+
+package metalfs;
+
+import "google/protobuf/empty.proto";
+
+// Metadata of a given file.
+message FileMetadata {
+  // File name
+  string filename = 1;
+  // An map of chunk index to chunk handle
+  map<uint32, string> chunks = 2;
+}
+
+// The file chunk. Used for serializing/deserializing the data
+// to/from binary for disk storage.
+message Chunk {
+  // The version of the chunk.
+  uint32 version = 1;
+  // The actual data for the chunk.
+  bytes data = 2;
+}
+
+// Metadata of a given file chunk
+message ChunkMetadata {
+  // An immutable and globally unique UUID chunk identifier.
+  // This is assigned by the master at the time of chunk creation.
+  string handle = 1;
+  // A version number associated with each chunk to distinguish between
+  // up-to-date and stale replica. For newly created file chunks, chunk
+  // version is always 1.
+  uint32 version = 2;
+  // The primary data server selected for a given chunk.
+  FilerLocation primary_location = 3;
+  // A list of data server locations indicating where the replica are that are
+  // holding this chunk.
+  repeated FilerLocation locations = 4;
+}
+
+message FilerLocation {
+  // The hostname of this data server location
+  string hostname = 1;
+  // The port that this data server is listening on for requests
+  uint32 port = 2;
+}
+
+message FilerServer {
+  // Used as the unique identifier for this data server.
+  FilerLocation location = 1;
+  // Amount of disk in megabytes available on the server
+  uint32 available_disk_mb = 2;
+  // The chunk handles for chunks on this server.
+  repeated string stored_chunk_handles = 3;
+}
+
+// This service running on the data server is used by the master to
+// send control information to it. Such as checking the filer server heartbeat.
+service FilerControlService {
+  // Used to check if the filer server is alive. The filer server sends an ok,
+  // and a reply. A reply shows that the server is alive.
+  rpc HeartBeat(HeartBeatRequest) returns (HeartBeatResponse) {}
+  // Handles a TriggerChunkReport request by master. Usually the
+  // filer server reports itself to the master, but there are instances where
+  // the master needs to trigger/ask for the report itself. e.g. if the master
+  // crashed and restarting.
+  rpc TriggerChunkReport(TriggerChunkReportRequest)
+      returns (TriggerChunkReportResponse) {}
+}
+
+// Empty request for now.
+// We can use this to pass the deleted chunks list to the filer server.
+message HeartBeatRequest {}
+
+message HeartBeatResponse {
+  // The original request associated with this reply.
+  HeartBeatRequest request = 1;
+}
+
+// Empty request for now.
+message TriggerChunkReportRequest {}
+
+message TriggerChunkReportResponse {
+  // The original request associated with this reply.
+  TriggerChunkReportRequest request = 1;
+}
+
+service MasterMetadataService {
+  rpc OpenFile(OpenFileRequest) returns (OpenFileResponse) {}
+  rpc DeleteFile(DeleteFileRequest) returns (google.protobuf.Empty) {}
+}
+
+message OpenFileRequest {
+  // Absolute file name or directory name
+  string filename = 1;
+  // A chunk index is byte_range / chunk block size.
+  uint32 chunk_index = 2;
+  // Open mode.
+  enum OpenMode {
+    UNKNOWN = 0;
+    READ = 1;
+    WRITE = 2;
+    CREATE = 3;
+    APPEND = 4;
+  }
+  OpenMode mode = 3;
+  // Create the file chunk, if it doesn't exist. This is only valid for WRITE
+  // mode.
+  bool create_if_not_exists = 4;
+}
+
+message OpenFileResponse {
+  // The original request associated with this reply.
+  OpenFileRequest request = 1;
+  // The metadata for the requested file chunk.
+  ChunkMetadata metadata = 2;
+}
+
+message DeleteFileRequest {
+  // Absolute file name or directory name
+  string filename = 1;
+}
+
+service MasterReportingService {
+  // Each file server periodically reports the chunks it has,
+  // and the master replies with the identity of all chunks that are
+  // no longer present in the master’s metadata, as well as the reported
+  // chunks with stale version.
+  rpc ReportChunk(ReportChunkRequest) returns (ReportChunkResponse) {}
+}
+
+// Server type has list of handles, and we are using stored_chunks here
+// again for handle to version mapping.
+message ReportChunkRequest {
+  // The filer server making this request.
+  FilerServer filer_server = 1;
+  // All the chunks stored on the filer server.
+  repeated ChunkMetadata stored_chunks = 2;
+}
+
+message ReportChunkResponse {
+  // The original request associated with this reply.
+  ReportChunkRequest request = 1;
+  // The chunks reported by the filer server that the master considers to be
+  // stale. This allows the filer server to delete them.
+  repeated string stale_chunk_handles = 2;
+}

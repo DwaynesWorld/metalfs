@@ -1,5 +1,4 @@
 use std::process::Command;
-use std::string::String;
 
 fn set_env(name: &str, cmd: &mut Command) {
     let value = match cmd.output() {
@@ -12,7 +11,7 @@ fn set_env(name: &str, cmd: &mut Command) {
     println!("cargo:rustc-env={}={}", name, value);
 }
 
-fn main() {
+fn set_version() {
     set_env(
         "GIT_BRANCH",
         Command::new("git").args(&["rev-parse", "--abbrev-ref", "HEAD"]),
@@ -26,4 +25,10 @@ fn main() {
         Command::new("git").args(&["describe", "--always", "HEAD"]),
     );
     set_env("RUST_VERSION", Command::new("rustc").arg("--version"));
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    set_version();
+    tonic_build::compile_protos("../protos/metalfs.proto").unwrap();
+    Ok(())
 }

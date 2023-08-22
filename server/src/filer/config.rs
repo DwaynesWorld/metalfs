@@ -1,9 +1,8 @@
+use crate::core::logger::Level;
 use clap::Args;
 
-use common::logger::Level;
-
 #[derive(Args, Debug)]
-pub struct ServerConfig {
+pub struct FilerServerConfig {
     #[clap(
         short,
         long,
@@ -18,7 +17,7 @@ pub struct ServerConfig {
 
     #[clap(
         long = "host",
-        env = "METALFS_CONTROLLER_HOST",
+        env = "METALFS_FILER_HOST",
         default_value = "localhost",
         forbid_empty_values = true,
         help = "Host the server will bind to"
@@ -28,7 +27,7 @@ pub struct ServerConfig {
 
     #[clap(
         long = "port",
-        env = "METALFS_CONTROLLER_PORT",
+        env = "METALFS_FILER_PORT",
         default_value = "5000",
         forbid_empty_values = true,
         help = "Port the server will bind to"

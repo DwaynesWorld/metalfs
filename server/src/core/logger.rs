@@ -1,7 +1,6 @@
-use std::str::FromStr;
-
 use fern::colors::Color;
 use fern::colors::ColoredLevelConfig;
+use std::str::FromStr;
 
 #[derive(Debug, clap::ValueEnum, Clone)]
 pub enum Level {
