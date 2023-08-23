@@ -30,37 +30,38 @@ message ChunkMetadata {
   // up-to-date and stale replica. For newly created file chunks, chunk
   // version is always 1.
   uint32 version = 2;
-  // The primary data server selected for a given chunk.
-  FilerLocation primary_location = 3;
-  // A list of data server locations indicating where the replica are that are
-  // holding this chunk.
-  repeated FilerLocation locations = 4;
+  // The primary storage server selected for a given chunk.
+  StorageServerLocation primary_location = 3;
+  // A list of storage server locations indicating where the replica are that
+  // are holding this chunk.
+  repeated StorageServerLocation locations = 4;
 }
 
-message FilerLocation {
-  // The hostname of this data server location
+message StorageServerLocation {
+  // The hostname of this storage server location
   string hostname = 1;
-  // The port that this data server is listening on for requests
+  // The port that this storage server is listening on for requests
   uint32 port = 2;
 }
 
-message FilerServer {
-  // Used as the unique identifier for this data server.
-  FilerLocation location = 1;
+message StorageServer {
+  // Used as the unique identifier for this storage server.
+  StorageServerLocation location = 1;
   // Amount of disk in megabytes available on the server
   uint32 available_disk_mb = 2;
   // The chunk handles for chunks on this server.
   repeated string stored_chunk_handles = 3;
 }
 
-// This service running on the data server is used by the master to
-// send control information to it. Such as checking the filer server heartbeat.
-service FilerControlService {
-  // Used to check if the filer server is alive. The filer server sends an ok,
-  // and a reply. A reply shows that the server is alive.
+// This service running on the storage server is used by the master to
+// send control information to it. Such as checking the storage server
+// heartbeat.
+service StorageServerControlService {
+  // Used to check if the storage server is alive. The storage server sends an
+  // ok, and a reply. A reply shows that the server is alive.
   rpc HeartBeat(HeartBeatRequest) returns (HeartBeatResponse) {}
   // Handles a TriggerChunkReport request by master. Usually the
-  // filer server reports itself to the master, but there are instances where
+  // storage server reports itself to the master, but there are instances where
   // the master needs to trigger/ask for the report itself. e.g. if the master
   // crashed and restarting.
   rpc TriggerChunkReport(TriggerChunkReportRequest)
@@ -68,7 +69,7 @@ service FilerControlService {
 }
 
 // Empty request for now.
-// We can use this to pass the deleted chunks list to the filer server.
+// We can use this to pass the deleted chunks list to the storage server.
 message HeartBeatRequest {}
 
 message HeartBeatResponse {
@@ -131,16 +132,16 @@ service MasterReportingService {
 // Server type has list of handles, and we are using stored_chunks here
 // again for handle to version mapping.
 message ReportChunkRequest {
-  // The filer server making this request.
-  FilerServer filer_server = 1;
-  // All the chunks stored on the filer server.
+  // The storage server making this request.
+  StorageServer storage_server = 1;
+  // All the chunks stored on the storage server.
   repeated ChunkMetadata stored_chunks = 2;
 }
 
 message ReportChunkResponse {
   // The original request associated with this reply.
   ReportChunkRequest request = 1;
-  // The chunks reported by the filer server that the master considers to be
-  // stale. This allows the filer server to delete them.
+  // The chunks reported by the storage server that the master considers to be
+  // stale. This allows the storage server to delete them.
   repeated string stale_chunk_handles = 2;
 }

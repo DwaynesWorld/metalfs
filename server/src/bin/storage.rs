@@ -5,16 +5,16 @@ use clap::Subcommand;
 use dotenv::dotenv;
 use log::error;
 use mfs::core::version;
-use mfs::filer::config::FilerServerConfig;
-use mfs::filer::server;
+use mfs::storage::config::StorageServerConfig;
+use mfs::storage::server;
 use mfs::BANNER;
 
-pub const LOG: &str = "metalfs::filer";
+pub const LOG: &str = "metalfs::storage";
 
-const INFO: &str = "Web server that orchestrates file-system operations and metadata.";
+const INFO: &str = "Web server that manages file storage.";
 
 #[derive(Debug, Parser)]
-#[clap(name = "Master service command-line interface")]
+#[clap(name = "Storage service command-line interface")]
 #[clap(about = INFO, before_help = BANNER, disable_version_flag = true, arg_required_else_help = true)]
 struct AppOptions {
     #[clap(subcommand)]
@@ -23,7 +23,7 @@ struct AppOptions {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    Server(FilerServerConfig),
+    Server(StorageServerConfig),
     Version,
 }
 

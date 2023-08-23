@@ -2,15 +2,15 @@
 name = "mfs"
 version = "0.1.0"
 edition = "2021"
-default-run = "master"
+default-run = "mfs-master"
 
 [[bin]]
-name = "master"
+name = "mfs-master"
 path = "src/bin/master.rs"
 
 [[bin]]
-name = "filer"
-path = "src/bin/filer.rs"
+name = "mfs-storage"
+path = "src/bin/storage.rs"
 
 [dependencies]
 # shared dependencies

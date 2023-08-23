@@ -1,4 +1,4 @@
-use super::manager::FilerManager;
+use super::manager::StorageManager;
 use crate::metalfs::{
     master_metadata_service_server::{MasterMetadataService, MasterMetadataServiceServer},
     DeleteFileRequest, OpenFileRequest, OpenFileResponse,
@@ -6,7 +6,7 @@ use crate::metalfs::{
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-pub(crate) fn make_metadata_server(_: Arc<FilerManager>) -> MasterMetadataServiceServer<Service> {
+pub(crate) fn make_metadata_server(_: Arc<StorageManager>) -> MasterMetadataServiceServer<Service> {
     MasterMetadataServiceServer::new(Service::new())
 }
 

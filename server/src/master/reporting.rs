@@ -1,14 +1,14 @@
-use std::sync::Arc;
-
+use super::manager::StorageManager;
 use crate::metalfs::{
     master_reporting_service_server::{MasterReportingService, MasterReportingServiceServer},
     ReportChunkRequest, ReportChunkResponse,
 };
+use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-use super::manager::FilerManager;
-
-pub(crate) fn make_reporting_server(_: Arc<FilerManager>) -> MasterReportingServiceServer<Service> {
+pub(crate) fn make_reporting_server(
+    _: Arc<StorageManager>,
+) -> MasterReportingServiceServer<Service> {
     MasterReportingServiceServer::new(Service::new())
 }
 

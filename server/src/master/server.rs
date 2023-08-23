@@ -3,7 +3,7 @@ use super::metadata::make_metadata_server;
 use super::reporting::make_reporting_server;
 use crate::{
     core::logger,
-    master::{manager::FilerManager, monitoring::build_and_run_monitoring_service},
+    master::{manager::StorageManager, monitoring::build_and_run_monitoring_service},
 };
 use actix_web::{middleware, web, App, HttpServer};
 use std::{net::SocketAddr, sync::Arc};
@@ -15,16 +15,16 @@ pub async fn run(config: MasterServerConfig) -> std::io::Result<()> {
 
     info!("Starting master server...");
 
-    let filer_mgr = Arc::new(FilerManager::new());
+    let storage_mgr = Arc::new(StorageManager::new());
 
     // Assemble and start the rpc server.
-    let rpc = build_and_serve_rpc(&config, filer_mgr.clone());
+    let rpc = build_and_serve_rpc(&config, storage_mgr.clone());
 
     // Assemble and start the http server.
-    let http = build_and_serve_http(&config, filer_mgr.clone());
+    let http = build_and_serve_http(&config, storage_mgr.clone());
 
     // Start the file server heartbeat monitor task after services have been started.
-    let monitoring = build_and_run_monitoring_service(filer_mgr.clone());
+    let monitoring = build_and_run_monitoring_service(storage_mgr.clone());
 
     // Listen for ctrl-c
     let signal = tokio::spawn(async move {
@@ -43,7 +43,7 @@ pub async fn run(config: MasterServerConfig) -> std::io::Result<()> {
 
 fn build_and_serve_rpc(
     config: &MasterServerConfig,
-    filer_mgr: Arc<FilerManager>,
+    storage_mgr: Arc<StorageManager>,
 ) -> tokio::task::JoinHandle<Result<(), tonic::transport::Error>> {
     let host = config.host.clone();
     let port = config.rpc_port.clone();
@@ -53,8 +53,8 @@ fn build_and_serve_rpc(
         .expect("Error parsing RPC host and port");
 
     let server = Server::builder()
-        .add_service(make_reporting_server(filer_mgr.clone()))
-        .add_service(make_metadata_server(filer_mgr.clone()))
+        .add_service(make_reporting_server(storage_mgr.clone()))
+        .add_service(make_metadata_server(storage_mgr.clone()))
         .serve(addr);
 
     let task = tokio::spawn(async move {
@@ -67,7 +67,7 @@ fn build_and_serve_rpc(
 
 fn build_and_serve_http(
     config: &MasterServerConfig,
-    _: Arc<FilerManager>,
+    _: Arc<StorageManager>,
 ) -> tokio::task::JoinHandle<Result<(), std::io::Error>> {
     let host = config.host.clone();
     let port = config.http_port.clone();

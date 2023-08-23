@@ -5,9 +5,10 @@ extern crate log;
 extern crate error_chain;
 
 pub mod core;
-pub mod filer;
 pub mod master;
+pub mod storage;
 
+#[allow(non_snake_case)]
 pub mod metalfs {
     tonic::include_proto!("metalfs");
 }
