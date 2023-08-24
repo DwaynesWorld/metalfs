@@ -1,10 +1,9 @@
 use super::config::MasterServerConfig;
-use super::metadata::make_metadata_server;
-use super::reporting::make_reporting_server;
-use crate::{
-    core::logger,
-    master::{manager::StorageManager, monitoring::build_and_run_monitoring_service},
-};
+use super::managers::storage::StorageManager;
+use super::services::metadata::make_metadata_server;
+use super::services::monitoring::build_and_run_monitoring_service;
+use super::services::reporting::make_reporting_server;
+use crate::core::logger;
 use actix_web::{middleware, web, App, HttpServer};
 use std::{net::SocketAddr, sync::Arc};
 use tonic::transport::Server;

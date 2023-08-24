@@ -1,8 +1,7 @@
-use super::manager::StorageManager;
-use crate::metalfs::{
-    master_reporting_service_server::{MasterReportingService, MasterReportingServiceServer},
-    ReportChunkRequest, ReportChunkResponse,
-};
+use crate::master::managers::storage::StorageManager;
+use crate::metalfs::master_reporting_service_server as mrss;
+use crate::metalfs::{ReportChunkRequest, ReportChunkResponse};
+use mrss::{MasterReportingService, MasterReportingServiceServer};
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 

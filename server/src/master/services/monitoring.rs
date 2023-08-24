@@ -1,16 +1,11 @@
-use super::manager::StorageManager;
-use crate::{
-    core::shutdown::Shutdown,
-    metalfs::{
-        storage_server_control_service_client::StorageServerControlServiceClient as SSCSClient,
-        HeartBeatRequest,
-    },
-};
+use crate::core::shutdown::Shutdown;
+use crate::master::managers::storage::StorageManager;
+use crate::metalfs::storage_server_control_service_client as sscss;
+use crate::metalfs::HeartBeatRequest;
+use sscss::StorageServerControlServiceClient as SSCSClient;
 use std::{collections::HashMap, sync::Arc};
-use tokio::{
-    sync::Mutex,
-    time::{interval, Duration},
-};
+use tokio::sync::Mutex;
+use tokio::time::{interval, Duration};
 use tonic::transport::Channel;
 
 // Timeout for heartbeats
