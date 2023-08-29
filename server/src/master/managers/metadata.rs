@@ -4,29 +4,13 @@ use crate::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, RwLock,
+    },
 };
 
-#[derive(Debug)]
-pub(crate) struct MetadataManagerImpl {
-    global_chunk_id: AtomicU64,
-    deleted_chunk_handles: HashSet<String>,
-    file_metadata: HashMap<String, Arc<FileMetadata>>,
-    chunk_metadata: HashMap<String, Arc<ChunkMetadata>>,
-    lease_holders: HashMap<String, (Location, u64)>,
-}
-
-impl MetadataManagerImpl {
-    pub fn new() -> Self {
-        Self {
-            global_chunk_id: AtomicU64::new(0),
-            deleted_chunk_handles: HashSet::new(),
-            file_metadata: HashMap::new(),
-            chunk_metadata: HashMap::new(),
-            lease_holders: HashMap::new(),
-        }
-    }
-}
+use super::locking::{InMemoryLockManager, LockManager};
 
 pub trait MetadataManager {
     /// Create the file metadata (and a lock associated with this file) for a
@@ -87,9 +71,66 @@ pub trait MetadataManager {
     fn allocate_new_chunk_handle(&self) -> String;
 }
 
-impl MetadataManager for MetadataManagerImpl {
+pub(crate) struct DefaultMetadataManager {
+    global_chunk_id: AtomicU64,
+    deleted_chunk_handles: HashSet<String>,
+    file_metadatas: Arc<RwLock<HashMap<String, Arc<FileMetadata>>>>,
+    chunk_metadatas: HashMap<String, Arc<ChunkMetadata>>,
+    lease_holders: HashMap<String, (Location, u64)>,
+    lock_manager: Arc<dyn LockManager>,
+}
+
+impl DefaultMetadataManager {
+    pub fn new() -> Self {
+        Self {
+            global_chunk_id: AtomicU64::new(0),
+            deleted_chunk_handles: HashSet::new(),
+            file_metadatas: Arc::new(RwLock::new(HashMap::new())),
+            chunk_metadatas: HashMap::new(),
+            lease_holders: HashMap::new(),
+            lock_manager: Arc::new(InMemoryLockManager::new()),
+        }
+    }
+}
+
+impl MetadataManager for DefaultMetadataManager {
     fn create_file_metadata(&self, name: &String) -> Result<(), MetalFsError> {
-        todo!()
+        // Lock all parent directories
+        let parent_locks = self.lock_manager.fetch_parent_locks(name)?;
+        let mut guards = Vec::new();
+
+        parent_locks.iter().for_each(|pl| {
+            guards.push(pl.read().unwrap());
+        });
+
+        // Create lock for file metadata
+        let file_lock;
+        let result = self.lock_manager.create_lock(name);
+
+        if result.is_ok() {
+            file_lock = result.unwrap();
+        } else {
+            let err = result.err().unwrap();
+
+            if !err.is_lock_already_exists() {
+                return Err(err);
+            }
+
+            file_lock = self.lock_manager.fetch_lock(name)?;
+        }
+
+        let _guard = file_lock.write().unwrap();
+
+        // Create metadata object in memory
+        let meta = Arc::new(FileMetadata {
+            filename: name.to_string(),
+            chunks: HashMap::new(),
+        });
+
+        let mut file_metadata = self.file_metadatas.write().unwrap();
+        file_metadata.insert(name.to_owned(), meta).unwrap();
+
+        Ok(())
     }
 
     fn file_metadata_exists(&self, name: &String) -> bool {
@@ -145,6 +186,8 @@ impl MetadataManager for MetadataManagerImpl {
     }
 
     fn allocate_new_chunk_handle(&self) -> String {
-        todo!()
+        self.global_chunk_id
+            .fetch_add(1u64, Ordering::SeqCst)
+            .to_string()
     }
 }
