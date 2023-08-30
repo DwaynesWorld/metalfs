@@ -13,6 +13,7 @@ pub(crate) fn make_metadata_server(
 }
 
 pub(crate) struct Service {
+    #[allow(dead_code)]
     storage_manager: Arc<StorageManager>,
 }
 

@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::{
     core::errors::MetalFsError,
     metalfs::{ChunkMetadata, FileMetadata, StorageServerLocation as Location},
