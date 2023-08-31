@@ -104,10 +104,10 @@ impl MetadataManager for DefaultMetadataManager {
     fn create_file_metadata(&self, name: &String) -> Result<(), MetalFsError> {
         // Lock all parent directories
         let parent_locks = self.lock_manager.fetch_parent_locks(name)?;
-        let mut guards = Vec::new();
+        let mut parent_lock_guards = Vec::new();
 
         parent_locks.iter().for_each(|pl| {
-            guards.push(pl.read().unwrap());
+            parent_lock_guards.push(pl.read().unwrap());
         });
 
         // Create lock for file metadata
