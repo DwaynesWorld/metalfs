@@ -13,6 +13,18 @@ pub enum MetalFsError {
 
     #[error("lock not found for filename `{0}`")]
     LockNotFound(String),
+
+    #[error("file metadata not found for filename `{0}`")]
+    FileMetadataNotFound(String),
+
+    #[error("chunk {0} already exists for filename `{1}`")]
+    ChunkAlreadyExists(u32, String),
+
+    #[error("chunk {0} not found for filename `{1}`")]
+    ChunkNotFound(u32, String),
+
+    #[error("chunk metadata not found for handle `{0}`")]
+    ChunkMetadataNotFound(String),
 }
 
 impl MetalFsError {
