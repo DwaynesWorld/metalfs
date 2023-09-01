@@ -84,7 +84,7 @@ pub(crate) struct DefaultMetadataManager {
     file_metadatas: Arc<RwLock<HashMap<String, Arc<RwLock<FileMetadata>>>>>,
     chunk_metadatas: RwLock<HashMap<String, Arc<RwLock<ChunkMetadata>>>>,
     lease_holders: RwLock<HashMap<String, (Location, u64)>>,
-    lock_manager: Arc<dyn LockManager>,
+    lock_manager: Arc<dyn LockManager + Sync + Send>,
 }
 
 impl DefaultMetadataManager {
@@ -292,4 +292,83 @@ impl MetadataManager for DefaultMetadataManager {
             .fetch_add(1u64, Ordering::SeqCst)
             .to_string()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+
+    #[test]
+    fn create_single_file_metadata_works() {
+        let manager = DefaultMetadataManager::new();
+
+        let name = String::from("/foo");
+        let result = manager.create_file_metadata(&name);
+        assert!(result.is_ok());
+        assert!(manager.file_metadata_exists(&name));
+
+        let result = manager.get_file_metadata(&name);
+        assert!(result.is_ok());
+
+        let file_metadata = result.unwrap();
+        assert_eq!(file_metadata.read().unwrap().filename, name);
+
+        let result = manager.create_chunk_handle(&name, 0);
+        assert!(result.is_ok());
+
+        let handle = result.unwrap();
+        assert_eq!(handle, String::from("0"));
+        assert_eq!(file_metadata.read().unwrap().chunks.len(), 1);
+    }
+
+    #[test]
+    fn create_multiple_file_metadatas_concurrently_works() {
+        let num_threads = 100;
+        let mut threads = Vec::with_capacity(num_threads);
+        let manager = Arc::new(DefaultMetadataManager::new());
+
+        for i in 0..num_threads {
+            let clone = manager.clone();
+            let filename = format!("/{i}");
+
+            threads.push(thread::spawn(move || {
+                _ = clone.create_file_metadata(&filename);
+                _ = clone.create_chunk_handle(&filename, 0);
+            }));
+        }
+
+        for thread in threads {
+            _ = thread.join();
+        }
+
+        let mut unique_handles = HashSet::new();
+
+        for i in 0..num_threads {
+            let filename = format!("/{i}");
+            assert!(manager.file_metadata_exists(&filename));
+
+            let result = manager.get_file_metadata(&filename);
+            assert!(result.is_ok());
+
+            let file_metadata = result.unwrap();
+            assert_eq!(file_metadata.read().unwrap().filename, filename);
+            assert_eq!(file_metadata.read().unwrap().chunks.len(), 1);
+
+            unique_handles.insert(
+                file_metadata
+                    .read()
+                    .unwrap()
+                    .chunks
+                    .get(&0)
+                    .unwrap()
+                    .clone(),
+            );
+        }
+
+        assert_eq!(unique_handles.len(), num_threads);
+    }
+
+    #[test]
+    fn create_single_file_metadata_concurrently_works() {}
 }

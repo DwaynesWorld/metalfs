@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn create_multiple_locks_concurrently_works() {
-        let num_threads = 10;
+        let num_threads = 100;
         let mut threads = Vec::with_capacity(num_threads);
         let manager = Arc::new(InMemoryLockManager::new());
 
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn create_single_lock_concurrently_works() {
-        let num_threads = 10;
+        let num_threads = 100;
         let mut threads = Vec::with_capacity(num_threads);
         let manager = Arc::new(InMemoryLockManager::new());
         let count = Arc::new(AtomicU32::new(0));
