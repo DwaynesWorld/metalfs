@@ -14,6 +14,9 @@ pub enum MetalFsError {
     #[error("lock not found for filename `{0}`")]
     LockNotFound(String),
 
+    #[error("file metadata already exists for filename `{0}`")]
+    FileMetadataAlreadyExists(String),
+
     #[error("file metadata not found for filename `{0}`")]
     FileMetadataNotFound(String),
 
@@ -30,6 +33,30 @@ pub enum MetalFsError {
 impl MetalFsError {
     pub fn is_lock_already_exists(&self) -> bool {
         if let MetalFsError::LockAlreadyExists(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_lock_not_found(&self) -> bool {
+        if let MetalFsError::LockNotFound(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_file_already_exists(&self) -> bool {
+        if let MetalFsError::FileMetadataAlreadyExists(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_file_not_found(&self) -> bool {
+        if let MetalFsError::FileMetadataNotFound(_) = self {
             true
         } else {
             false
