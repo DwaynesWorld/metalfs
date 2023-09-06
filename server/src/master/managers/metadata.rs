@@ -70,7 +70,6 @@ pub trait MetadataManager {
 
 pub(crate) struct DefaultMetadataManager {
     global_chunk_id: AtomicU64,
-    _deleted_chunk_handles: HashSet<String>,
     file_metadatas: Arc<RwLock<HashMap<String, Arc<RwLock<FileMetadata>>>>>,
     chunk_metadatas: RwLock<HashMap<String, Arc<RwLock<ChunkMetadata>>>>,
     lease_holders: RwLock<HashMap<String, (Location, u64)>>,
@@ -82,7 +81,6 @@ impl DefaultMetadataManager {
     pub fn new() -> Self {
         Self {
             global_chunk_id: AtomicU64::new(0),
-            _deleted_chunk_handles: HashSet::new(),
             file_metadatas: Arc::new(RwLock::new(HashMap::new())),
             chunk_metadatas: RwLock::new(HashMap::new()),
             lease_holders: RwLock::new(HashMap::new()),
@@ -504,5 +502,182 @@ mod tests {
         let file_metadata = file_metadata.read().unwrap();
         assert_eq!(file_metadata.filename, filename);
         assert_eq!(file_metadata.chunks.len(), num_chunks_per_file);
+    }
+
+    #[test]
+    fn create_multiple_file_metadatas_concurrently_same_parent_folder_works() {
+        let num_threads = 100;
+        let mut threads = Vec::with_capacity(num_threads);
+        let manager = Arc::new(DefaultMetadataManager::new());
+
+        let result = manager.create_file_metadata(&format!("/foo"));
+        assert!(result.is_ok());
+
+        for i in 0..num_threads {
+            let clone = manager.clone();
+            let filename = format!("/foo/{i}");
+
+            threads.push(thread::spawn(move || {
+                _ = clone.create_file_metadata(&filename);
+                _ = clone.create_chunk_handle(&filename, 0);
+            }));
+        }
+
+        for thread in threads {
+            _ = thread.join();
+        }
+
+        let mut unique_handles = HashSet::new();
+
+        for i in 0..num_threads {
+            let filename = format!("/foo/{i}");
+            assert!(manager.file_metadata_exists(&filename));
+
+            let result = manager.get_file_metadata(&filename);
+            assert!(result.is_ok());
+
+            let file_metadata = result.unwrap();
+            assert_eq!(file_metadata.read().unwrap().filename, filename);
+            assert_eq!(file_metadata.read().unwrap().chunks.len(), 1);
+
+            unique_handles.insert(
+                file_metadata
+                    .read()
+                    .unwrap()
+                    .chunks
+                    .get(&0)
+                    .unwrap()
+                    .clone(),
+            );
+        }
+
+        assert_eq!(unique_handles.len(), num_threads);
+    }
+
+    #[test]
+    fn set_and_get_chunk_metadata_works() {
+        let manager = Arc::new(DefaultMetadataManager::new());
+        let filename = format!("/key");
+        let result = manager.create_file_metadata(&filename);
+        assert!(result.is_ok());
+
+        let result = manager.create_chunk_handle(&filename, 0);
+        assert!(result.is_ok());
+
+        let handle = result.unwrap();
+
+        let metadata = ChunkMetadata {
+            handle: handle.clone(),
+            version: 0,
+            primary_location: Some(Location {
+                hostname: "localhost".to_string(),
+                port: 5000,
+            }),
+            locations: vec![
+                Location {
+                    hostname: "localhost".to_string(),
+                    port: 5000,
+                },
+                Location {
+                    hostname: "localhost".to_string(),
+                    port: 5001,
+                },
+                Location {
+                    hostname: "localhost".to_string(),
+                    port: 5002,
+                },
+            ],
+        };
+
+        let metadata = Arc::new(RwLock::new(metadata));
+        manager.set_chunk_metadata(metadata.clone());
+
+        let result = manager.get_chunk_metadata(&handle);
+        assert!(result.is_ok());
+
+        let binding = result.unwrap();
+        let metadata_ = binding.read().unwrap();
+        let metadata = metadata.read().unwrap();
+
+        assert_eq!(metadata.handle, metadata_.handle);
+        assert_eq!(metadata.version, metadata_.version);
+
+        assert_eq!(
+            metadata.clone().primary_location.unwrap().hostname,
+            metadata_.clone().primary_location.unwrap().hostname
+        );
+        assert_eq!(
+            metadata.clone().primary_location.unwrap().port,
+            metadata_.clone().primary_location.unwrap().port
+        );
+        assert_eq!(
+            metadata.clone().locations[0].hostname,
+            metadata_.clone().locations[0].hostname
+        );
+        assert_eq!(
+            metadata.clone().locations[0].port,
+            metadata_.clone().locations[0].port
+        );
+        assert_eq!(
+            metadata.clone().locations[1].hostname,
+            metadata_.clone().locations[1].hostname
+        );
+        assert_eq!(
+            metadata.clone().locations[1].port,
+            metadata_.clone().locations[1].port
+        );
+        assert_eq!(
+            metadata.clone().locations[2].hostname,
+            metadata_.clone().locations[2].hostname
+        );
+        assert_eq!(
+            metadata.clone().locations[2].port,
+            metadata_.clone().locations[2].port
+        );
+    }
+
+    #[test]
+    fn file_deletion_works() {
+        let manager = Arc::new(DefaultMetadataManager::new());
+        let num_threads = 100;
+        let num_chunks_per_file = 77;
+        let mut threads = Vec::with_capacity(num_threads);
+
+        for i in 0..num_threads {
+            let mgr = manager.clone();
+            let filename = format!("/{i}");
+
+            threads.push(thread::spawn(move || {
+                for j in 0..num_chunks_per_file {
+                    _ = mgr.create_file_metadata(&filename);
+                    _ = mgr.create_chunk_handle(&filename, j as u32);
+                }
+            }));
+        }
+
+        for thread in threads {
+            _ = thread.join();
+        }
+
+        let mut threads = Vec::with_capacity(num_threads);
+
+        for i in 0..num_threads {
+            let mgr = manager.clone();
+            let filename = format!("/{i}");
+
+            threads.push(thread::spawn(move || {
+                _ = mgr.delete_file_and_chunk_metadata(&filename)
+            }));
+        }
+
+        for thread in threads {
+            _ = thread.join();
+        }
+
+        for i in 0..num_threads {
+            let mgr = manager.clone();
+            let filename = format!("/{i}");
+            assert!(!mgr.file_metadata_exists(&filename))
+        }
     }
 }
