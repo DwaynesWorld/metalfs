@@ -1,7 +1,7 @@
 use super::locking::{InMemoryLockManager, LockManager};
 use crate::core::errors::MetalFsError;
 use crate::metalfs::{ChunkMetadata, FileMetadata, StorageServerLocation as Location};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::vec;
@@ -290,6 +290,7 @@ impl MetadataManager for DefaultMetadataManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use std::{sync::atomic::AtomicU32, thread};
 
     #[test]

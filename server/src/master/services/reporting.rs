@@ -1,4 +1,4 @@
-use crate::master::managers::storage::StorageManager;
+use crate::master::managers::storage::ThreadSafeStorageManager;
 use crate::metalfs::master_reporting_service_server as mrss;
 use crate::metalfs::{ReportChunkRequest, ReportChunkResponse};
 use mrss::{MasterReportingService, MasterReportingServiceServer};
@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 pub(crate) fn make_reporting_server(
-    _: Arc<StorageManager>,
+    _: Arc<ThreadSafeStorageManager>,
 ) -> MasterReportingServiceServer<Service> {
     MasterReportingServiceServer::new(Service::new())
 }

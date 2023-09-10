@@ -1,5 +1,5 @@
 use crate::core::shutdown::Shutdown;
-use crate::master::managers::storage::StorageManager;
+use crate::master::managers::storage::ThreadSafeStorageManager;
 use crate::metalfs::storage_server_control_service_client as sscss;
 use crate::metalfs::HeartBeatRequest;
 use sscss::StorageServerControlServiceClient as SSCSClient;
@@ -15,17 +15,16 @@ pub const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
 pub(crate) fn build_and_run_monitoring_service(
-    storage_mgr: Arc<StorageManager>,
+    storage_mgr: Arc<ThreadSafeStorageManager>,
 ) -> Arc<MonitorService> {
     let service = Arc::new(MonitorService::new(storage_mgr));
     service.clone().start();
     service
 }
 
-#[derive(Debug)]
 pub(crate) struct MonitorService {
     // Storage manager
-    storage_mgr: Arc<StorageManager>,
+    storage_mgr: Arc<ThreadSafeStorageManager>,
     // Cached control clients
     control_clients: Mutex<HashMap<String, Arc<Mutex<SSCSClient<Channel>>>>>,
     // Synchronizer for controlled shutdown of service
@@ -33,7 +32,7 @@ pub(crate) struct MonitorService {
 }
 
 impl MonitorService {
-    pub fn new(storage_mgr: Arc<StorageManager>) -> Self {
+    pub fn new(storage_mgr: Arc<ThreadSafeStorageManager>) -> Self {
         MonitorService {
             storage_mgr,
             control_clients: Mutex::new(HashMap::new()),
@@ -80,7 +79,8 @@ impl MonitorService {
     async fn send_heartbeat(&self) {
         // TODO - Make this configurable, with the config manager.
         let max_attempts: u8 = 3;
-        let map = self.storage_mgr.server_map.read().await;
+        let map = self.storage_mgr.get_server_location_map();
+        let map = map.read().await;
 
         for (location, _) in map.iter() {
             // Resolve address
@@ -114,7 +114,9 @@ impl MonitorService {
             // If reply isn't ok after all the attempts. We declare it as unavailable.
             // Lets unregister this server.
             if !success {
-                self.storage_mgr.unregister_server(location);
+                self.storage_mgr
+                    .unregister_server(location.to_owned())
+                    .await;
             }
         }
     }

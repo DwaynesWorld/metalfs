@@ -1,9 +1,8 @@
-use super::config::MasterServerConfig;
-use super::managers::storage::StorageManager;
 use super::services::metadata::make_metadata_server;
 use super::services::monitoring::build_and_run_monitoring_service;
 use super::services::reporting::make_reporting_server;
-use crate::core::logger;
+use super::{config::MasterServerConfig, managers::storage::ThreadSafeStorageManager};
+use crate::{core::logger, master::managers::storage::DefaultStorageManager};
 use actix_web::{middleware, web, App, HttpServer};
 use std::{net::SocketAddr, sync::Arc};
 use tonic::transport::Server;
@@ -14,7 +13,7 @@ pub async fn run(config: MasterServerConfig) -> std::io::Result<()> {
 
     info!("Starting master server...");
 
-    let storage_mgr = Arc::new(StorageManager::new());
+    let storage_mgr = Arc::new(DefaultStorageManager::new());
 
     // Assemble and start the rpc server.
     let rpc = build_and_serve_rpc(&config, storage_mgr.clone());
@@ -42,7 +41,7 @@ pub async fn run(config: MasterServerConfig) -> std::io::Result<()> {
 
 fn build_and_serve_rpc(
     config: &MasterServerConfig,
-    storage_mgr: Arc<StorageManager>,
+    storage_mgr: Arc<ThreadSafeStorageManager>,
 ) -> tokio::task::JoinHandle<Result<(), tonic::transport::Error>> {
     let host = config.host.clone();
     let port = config.rpc_port.clone();
@@ -66,7 +65,7 @@ fn build_and_serve_rpc(
 
 fn build_and_serve_http(
     config: &MasterServerConfig,
-    _: Arc<StorageManager>,
+    _: Arc<ThreadSafeStorageManager>,
 ) -> tokio::task::JoinHandle<Result<(), std::io::Error>> {
     let host = config.host.clone();
     let port = config.http_port.clone();

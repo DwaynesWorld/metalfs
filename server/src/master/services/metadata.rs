@@ -1,4 +1,4 @@
-use crate::master::managers::storage::StorageManager;
+use crate::master::managers::storage::ThreadSafeStorageManager;
 use crate::metalfs::master_metadata_service_server::MasterMetadataService;
 use crate::metalfs::master_metadata_service_server::MasterMetadataServiceServer;
 use crate::metalfs::open_file_request::OpenMode;
@@ -7,18 +7,18 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 pub(crate) fn make_metadata_server(
-    storage_manager: Arc<StorageManager>,
+    storage_manager: Arc<ThreadSafeStorageManager>,
 ) -> MasterMetadataServiceServer<Service> {
     MasterMetadataServiceServer::new(Service::new(storage_manager))
 }
 
 pub(crate) struct Service {
     #[allow(dead_code)]
-    storage_manager: Arc<StorageManager>,
+    storage_manager: Arc<ThreadSafeStorageManager>,
 }
 
 impl Service {
-    fn new(storage_manager: Arc<StorageManager>) -> Self {
+    fn new(storage_manager: Arc<ThreadSafeStorageManager>) -> Self {
         Service { storage_manager }
     }
 
