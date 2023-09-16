@@ -108,7 +108,7 @@ mod tests {
         let manager = InMemoryLockManager::new();
 
         let name = String::from("/foo");
-        _ = manager.create_lock(&name);
+        _ = manager.create_lock(&name).await;
         let exist = manager.exist(&name).await;
         assert!(exist);
 
@@ -131,7 +131,7 @@ mod tests {
             });
         }
 
-        for _ in set.join_next().await {}
+        while let Some(_) = set.join_next().await {}
 
         for i in 0..num_threads {
             assert!(manager.exist(&format!("/{i}")).await)
@@ -157,7 +157,7 @@ mod tests {
             });
         }
 
-        for _ in set.join_next().await {}
+        while let Some(_) = set.join_next().await {}
 
         assert_eq!(count.load(Ordering::SeqCst), 1);
     }
@@ -167,12 +167,12 @@ mod tests {
         let manager = InMemoryLockManager::new();
 
         let name = String::from("/foo");
-        _ = manager.create_lock(&name);
+        _ = manager.create_lock(&name).await;
         let result = manager.fetch_lock(&name).await;
         assert!(result.is_ok());
 
         let name = String::from("/foo/bar");
-        _ = manager.create_lock(&name);
+        _ = manager.create_lock(&name).await;
         let result = manager.fetch_lock(&name).await;
         assert!(result.is_ok());
     }
@@ -180,9 +180,9 @@ mod tests {
     #[tokio::test]
     async fn fetch_parent_locks_with_varying_path_components_works() {
         let manager = Arc::new(InMemoryLockManager::new());
-        _ = manager.create_lock(&String::from("/foo"));
-        _ = manager.create_lock(&String::from("/foo/bar"));
-        _ = manager.create_lock(&String::from("/foo/bar/baz.o"));
+        _ = manager.create_lock(&String::from("/foo")).await;
+        _ = manager.create_lock(&String::from("/foo/bar")).await;
+        _ = manager.create_lock(&String::from("/foo/bar/baz.o")).await;
 
         let result = manager
             .fetch_parent_locks(&String::from("/foo/bar/baz.o"))

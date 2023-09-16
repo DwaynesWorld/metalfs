@@ -517,7 +517,6 @@ mod tests {
         let num_threads = 100;
         let mut set = JoinSet::new();
         let manager = Arc::new(DefaultMetadataManager::new());
-
         let result = manager.create_file_metadata(&format!("/foo")).await;
         assert!(result.is_ok());
 
@@ -530,6 +529,8 @@ mod tests {
                 _ = clone.create_chunk_handle(&filename, 0).await;
             });
         }
+
+        while let Some(_) = set.join_next().await {}
 
         let mut unique_handles = HashSet::new();
 
