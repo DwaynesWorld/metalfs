@@ -1,35 +1,40 @@
 use super::locking::{InMemoryLockManager, LockManager};
 use crate::core::errors::MetalFsError;
 use crate::metalfs::{ChunkMetadata, FileMetadata, StorageServerLocation as Location};
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::vec;
 
+#[async_trait]
 pub trait MetadataManager {
     /// Create the file metadata (and a lock associated with this file) for a
     /// given file path. This function returns error if the file path already
     /// exists or if any of the intermediate parent directory not found.
-    fn create_file_metadata(&self, name: &String) -> Result<(), MetalFsError>;
+    async fn create_file_metadata(&self, name: &String) -> Result<(), MetalFsError>;
 
     /// Check if metadata file exists.
-    fn file_metadata_exists(&self, name: &String) -> bool;
+    async fn file_metadata_exists(&self, name: &String) -> bool;
 
     /// Delete a file metadata, and delete all chunk handles associated with
     /// this file.
-    fn delete_file_and_chunk_metadata(&self, name: &String);
+    async fn delete_file_and_chunk_metadata(&self, name: &String);
 
     /// Access the file metadata for a given file path. The caller of this
     /// function needs to ensure the lock for this file is properly used.
     /// return error if fileMetadata not found.
-    fn get_file_metadata(&self, name: &String) -> Result<Arc<RwLock<FileMetadata>>, MetalFsError>;
+    async fn get_file_metadata(
+        &self,
+        name: &String,
+    ) -> Result<Arc<RwLock<FileMetadata>>, MetalFsError>;
 
     /// Create a file chunk for a given filename and a chunk index.
-    fn create_chunk_handle(&self, name: &String, index: u32) -> Result<String, MetalFsError>;
+    async fn create_chunk_handle(&self, name: &String, index: u32) -> Result<String, MetalFsError>;
 
     /// Retrieve a chunk handle for a given filename and chunk index. Return
     /// error if filename or chunk not found.
-    fn get_chunk_handle(&self, name: &String, index: u32) -> Result<String, MetalFsError>;
+    async fn get_chunk_handle(&self, name: &String, index: u32) -> Result<String, MetalFsError>;
 
     /// Advance the chunk version number for a chunk handle, return error if
     /// chunk handle not found.
@@ -89,19 +94,20 @@ impl DefaultMetadataManager {
     }
 }
 
+#[async_trait]
 impl MetadataManager for DefaultMetadataManager {
-    fn create_file_metadata(&self, name: &String) -> Result<(), MetalFsError> {
+    async fn create_file_metadata(&self, name: &String) -> Result<(), MetalFsError> {
         // Lock all parent directories
-        let parent_locks = self.lock_manager.fetch_parent_locks(name)?;
+        let parent_locks = self.lock_manager.fetch_parent_locks(name).await?;
         let mut parent_lock_guards = Vec::new();
 
-        parent_locks.iter().for_each(|pl| {
-            parent_lock_guards.push(pl.read().unwrap());
-        });
+        for pl in parent_locks.iter() {
+            parent_lock_guards.push(pl.read().await);
+        }
 
         // Create lock for file metadata
         let file_lock;
-        let result = self.lock_manager.create_lock(name);
+        let result = self.lock_manager.create_lock(name).await;
 
         if result.is_ok() {
             file_lock = result.unwrap();
@@ -112,10 +118,10 @@ impl MetadataManager for DefaultMetadataManager {
                 return Err(err);
             }
 
-            file_lock = self.lock_manager.fetch_lock(name)?;
+            file_lock = self.lock_manager.fetch_lock(name).await?;
         }
 
-        let _file_lock = file_lock.write().unwrap();
+        let _file_lock = file_lock.write().await;
 
         // Create metadata object in memory
         let meta = Arc::new(RwLock::new(FileMetadata {
@@ -133,23 +139,23 @@ impl MetadataManager for DefaultMetadataManager {
         Ok(())
     }
 
-    fn file_metadata_exists(&self, name: &String) -> bool {
+    async fn file_metadata_exists(&self, name: &String) -> bool {
         let file_metadatas = self.file_metadatas.read().unwrap();
         file_metadatas.contains_key(name)
     }
 
-    fn delete_file_and_chunk_metadata(&self, name: &String) {
-        let Ok(parent_locks) = self.lock_manager.fetch_parent_locks(name) else { return; };
+    async fn delete_file_and_chunk_metadata(&self, name: &String) {
+        let Ok(parent_locks) = self.lock_manager.fetch_parent_locks(name).await else { return; };
         let mut parent_lock_guards = Vec::new();
 
-        parent_locks.iter().for_each(|pl| {
-            parent_lock_guards.push(pl.read().unwrap());
-        });
+        for pl in parent_locks.iter() {
+            parent_lock_guards.push(pl.read().await);
+        }
 
-        let Ok(file_lock) = self.lock_manager.fetch_lock(name) else { return; };
-        let _file_lock = file_lock.write().unwrap();
+        let Ok(file_lock) = self.lock_manager.fetch_lock(name).await else { return; };
+        let _file_lock = file_lock.write().await;
 
-        let Ok(file_metadata) = self.get_file_metadata(name) else { return; };
+        let Ok(file_metadata) = self.get_file_metadata(name).await else { return; };
         let file_metadata = file_metadata.read().unwrap();
 
         let mut file_metadatas = self.file_metadatas.write().unwrap();
@@ -160,7 +166,10 @@ impl MetadataManager for DefaultMetadataManager {
         }
     }
 
-    fn get_file_metadata(&self, name: &String) -> Result<Arc<RwLock<FileMetadata>>, MetalFsError> {
+    async fn get_file_metadata(
+        &self,
+        name: &String,
+    ) -> Result<Arc<RwLock<FileMetadata>>, MetalFsError> {
         let file_metadatas = self.file_metadatas.read().unwrap();
         match file_metadatas.get(name) {
             Some(m) => Ok(m.clone()),
@@ -168,21 +177,21 @@ impl MetadataManager for DefaultMetadataManager {
         }
     }
 
-    fn create_chunk_handle(&self, name: &String, index: u32) -> Result<String, MetalFsError> {
+    async fn create_chunk_handle(&self, name: &String, index: u32) -> Result<String, MetalFsError> {
         let handle = self.allocate_new_chunk_handle();
 
         {
-            let parent_locks = self.lock_manager.fetch_parent_locks(name)?;
+            let parent_locks = self.lock_manager.fetch_parent_locks(name).await?;
             let mut parent_lock_guards = Vec::new();
 
-            parent_locks.iter().for_each(|pl| {
-                parent_lock_guards.push(pl.read().unwrap());
-            });
+            for pl in parent_locks.iter() {
+                parent_lock_guards.push(pl.read().await);
+            }
 
-            let file_lock = self.lock_manager.fetch_lock(name)?;
-            let _file_lock = file_lock.write().unwrap();
+            let file_lock = self.lock_manager.fetch_lock(name).await?;
+            let _file_lock = file_lock.write().await;
 
-            let file_metadata = self.get_file_metadata(name)?;
+            let file_metadata = self.get_file_metadata(name).await?;
             let mut file_metadata = file_metadata.write().unwrap();
 
             file_metadata.filename = name.to_owned();
@@ -205,18 +214,18 @@ impl MetadataManager for DefaultMetadataManager {
         Ok(handle)
     }
 
-    fn get_chunk_handle(&self, name: &String, index: u32) -> Result<String, MetalFsError> {
-        let parent_locks = self.lock_manager.fetch_parent_locks(name)?;
+    async fn get_chunk_handle(&self, name: &String, index: u32) -> Result<String, MetalFsError> {
+        let parent_locks = self.lock_manager.fetch_parent_locks(name).await?;
         let mut parent_lock_guards = Vec::new();
 
-        parent_locks.iter().for_each(|pl| {
-            parent_lock_guards.push(pl.read().unwrap());
-        });
+        for pl in parent_locks.iter() {
+            parent_lock_guards.push(pl.read().await);
+        }
 
-        let file_lock = self.lock_manager.fetch_lock(name)?;
-        let _file_lock = file_lock.write().unwrap();
+        let file_lock = self.lock_manager.fetch_lock(name).await?;
+        let _file_lock = file_lock.write().await;
 
-        let file_metadata = self.get_file_metadata(name)?;
+        let file_metadata = self.get_file_metadata(name).await?;
         let file_metadata = file_metadata.read().unwrap();
         match file_metadata.chunks.get(&index) {
             Some(m) => Ok(m.clone()),
@@ -225,14 +234,15 @@ impl MetadataManager for DefaultMetadataManager {
     }
 
     fn advance_chunk_version(&self, handle: &String) -> Result<(), MetalFsError> {
-        let chunk_metadata = self.get_chunk_metadata(handle)?;
+        let chunk_metadata = self.get_chunk_metadata(handle).unwrap();
 
         let mut chunk_metadata_ = chunk_metadata.write().unwrap();
         chunk_metadata_.version += 1;
         drop(chunk_metadata_);
 
-        self.set_chunk_metadata(chunk_metadata.clone());
-        Ok(())
+        // self.set_chunk_metadata(chunk_metadata.clone()).await;
+        // Ok(())
+        todo!()
     }
 
     fn chunk_metadata_exists(&self, handle: &String) -> bool {
@@ -291,24 +301,25 @@ impl MetadataManager for DefaultMetadataManager {
 mod tests {
     use super::*;
     use std::collections::HashSet;
-    use std::{sync::atomic::AtomicU32, thread};
+    use std::sync::atomic::AtomicU32;
+    use tokio::task::JoinSet;
 
-    #[test]
-    fn create_single_file_metadata_works() {
+    #[tokio::test]
+    async fn create_single_file_metadata_works() {
         let manager = DefaultMetadataManager::new();
 
         let name = String::from("/foo");
-        let result = manager.create_file_metadata(&name);
+        let result = manager.create_file_metadata(&name).await;
         assert!(result.is_ok());
-        assert!(manager.file_metadata_exists(&name));
+        assert!(manager.file_metadata_exists(&name).await);
 
-        let result = manager.get_file_metadata(&name);
+        let result = manager.get_file_metadata(&name).await;
         assert!(result.is_ok());
 
         let file_metadata = result.unwrap();
         assert_eq!(file_metadata.read().unwrap().filename, name);
 
-        let result = manager.create_chunk_handle(&name, 0);
+        let result = manager.create_chunk_handle(&name, 0).await;
         assert!(result.is_ok());
 
         let handle = result.unwrap();
@@ -316,63 +327,61 @@ mod tests {
         assert_eq!(file_metadata.read().unwrap().chunks.len(), 1);
     }
 
-    #[test]
-    fn create_duplicate_file_metadata_fails() {
+    #[tokio::test]
+    async fn create_duplicate_file_metadata_fails() {
         let manager = DefaultMetadataManager::new();
 
         let name = String::from("/foo");
-        let result = manager.create_file_metadata(&name);
+        let result = manager.create_file_metadata(&name).await;
         assert!(result.is_ok());
 
-        let result = manager.create_file_metadata(&name);
+        let result = manager.create_file_metadata(&name).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().is_file_already_exists());
     }
 
-    #[test]
-    fn get_nonexisting_file_metadata_fails() {
+    #[tokio::test]
+    async fn get_nonexisting_file_metadata_fails() {
         let manager = DefaultMetadataManager::new();
 
         let name = String::from("/foo");
-        let result = manager.create_file_metadata(&name);
+        let result = manager.create_file_metadata(&name).await;
         assert!(result.is_ok());
 
-        let result = manager.get_file_metadata(&format!("/bar"));
+        let result = manager.get_file_metadata(&format!("/bar")).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().is_file_not_found());
 
-        let result = manager.create_chunk_handle(&format!("/bar"), 0);
+        let result = manager.create_chunk_handle(&format!("/bar"), 0).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().is_lock_not_found());
     }
 
-    #[test]
-    fn create_multiple_file_metadatas_concurrently_works() {
+    #[tokio::test]
+    async fn create_multiple_file_metadatas_concurrently_works() {
         let num_threads = 100;
-        let mut threads = Vec::with_capacity(num_threads);
+        let mut set = JoinSet::new();
         let manager = Arc::new(DefaultMetadataManager::new());
 
         for i in 0..num_threads {
             let clone = manager.clone();
             let filename = format!("/{i}");
 
-            threads.push(thread::spawn(move || {
-                _ = clone.create_file_metadata(&filename);
-                _ = clone.create_chunk_handle(&filename, 0);
-            }));
+            set.spawn(async move {
+                _ = clone.create_file_metadata(&filename).await;
+                _ = clone.create_chunk_handle(&filename, 0).await;
+            });
         }
 
-        for thread in threads {
-            _ = thread.join();
-        }
+        while let Some(_) = set.join_next().await {}
 
         let mut unique_handles = HashSet::new();
 
         for i in 0..num_threads {
             let filename = format!("/{i}");
-            assert!(manager.file_metadata_exists(&filename));
+            assert!(manager.file_metadata_exists(&filename).await);
 
-            let result = manager.get_file_metadata(&filename);
+            let result = manager.get_file_metadata(&filename).await;
             assert!(result.is_ok());
 
             let file_metadata = result.unwrap();
@@ -393,10 +402,10 @@ mod tests {
         assert_eq!(unique_handles.len(), num_threads);
     }
 
-    #[test]
-    fn create_same_file_metadata_concurrently_works() {
+    #[tokio::test]
+    async fn create_same_file_metadata_concurrently_works() {
         let num_threads = 100;
-        let mut threads = Vec::with_capacity(num_threads);
+        let mut set = JoinSet::new();
         let manager = Arc::new(DefaultMetadataManager::new());
         let count = Arc::new(AtomicU32::new(0));
         let filename = format!("/key");
@@ -406,36 +415,32 @@ mod tests {
             let cnt_clone = count.clone();
             let fname_clone = filename.clone();
 
-            threads.push(thread::spawn(move || {
-                let result = mgr_clone.create_file_metadata(&fname_clone);
+            set.spawn(async move {
+                let result = mgr_clone.create_file_metadata(&fname_clone).await;
                 if result.is_ok() {
                     cnt_clone.fetch_add(1, Ordering::SeqCst);
                 }
-            }));
+            });
         }
 
-        for thread in threads {
-            _ = thread.join();
-        }
+        while let Some(_) = set.join_next().await {}
 
         assert_eq!(count.load(Ordering::SeqCst), 1);
 
-        let mut threads = Vec::with_capacity(num_threads);
+        let mut set = JoinSet::new();
 
         for i in 0..num_threads {
             let mgr_clone = manager.clone();
             let fname_clone = filename.clone();
 
-            threads.push(thread::spawn(move || {
-                let _ = mgr_clone.create_chunk_handle(&fname_clone, i as u32);
-            }));
+            set.spawn(async move {
+                let _ = mgr_clone.create_chunk_handle(&fname_clone, i as u32).await;
+            });
         }
 
-        for thread in threads {
-            _ = thread.join();
-        }
+        while let Some(_) = set.join_next().await {}
 
-        let result = manager.get_file_metadata(&filename);
+        let result = manager.get_file_metadata(&filename).await;
         assert!(result.is_ok());
 
         let file_metadata = result.unwrap();
@@ -459,44 +464,42 @@ mod tests {
         assert_eq!(unique_handles.len(), num_threads);
     }
 
-    #[test]
-    fn create_chunks_concurrently_works() {
+    #[tokio::test]
+    async fn create_chunks_concurrently_works() {
         let manager = Arc::new(DefaultMetadataManager::new());
 
         let filename = format!("/key");
-        let result = manager.create_file_metadata(&filename);
+        let result = manager.create_file_metadata(&filename).await;
         assert!(result.is_ok());
 
         let num_threads = 100;
         let num_chunks_per_file = 77;
         let err_count = Arc::new(AtomicU32::new(0));
-        let mut threads = Vec::with_capacity(num_threads);
+        let mut set = JoinSet::new();
 
         for _ in 0..num_threads {
             let mgr = manager.clone();
             let count = err_count.clone();
             let fname = filename.clone();
 
-            threads.push(thread::spawn(move || {
+            set.spawn(async move {
                 for i in 0..num_chunks_per_file {
-                    let result = mgr.create_chunk_handle(&fname, i as u32);
+                    let result = mgr.create_chunk_handle(&fname, i as u32).await;
                     if result.is_err() {
                         count.fetch_add(1, Ordering::SeqCst);
                     }
                 }
-            }));
+            });
         }
 
-        for thread in threads {
-            _ = thread.join();
-        }
+        while let Some(_) = set.join_next().await {}
 
         assert_eq!(
             err_count.load(Ordering::SeqCst),
             ((num_threads - 1) * num_chunks_per_file) as u32
         );
 
-        let result = manager.get_file_metadata(&filename);
+        let result = manager.get_file_metadata(&filename).await;
         assert!(result.is_ok());
 
         let file_metadata = result.unwrap();
@@ -505,36 +508,32 @@ mod tests {
         assert_eq!(file_metadata.chunks.len(), num_chunks_per_file);
     }
 
-    #[test]
-    fn create_multiple_file_metadatas_concurrently_same_parent_folder_works() {
+    #[tokio::test]
+    async fn create_multiple_file_metadatas_concurrently_same_parent_folder_works() {
         let num_threads = 100;
-        let mut threads = Vec::with_capacity(num_threads);
+        let mut set = JoinSet::new();
         let manager = Arc::new(DefaultMetadataManager::new());
 
-        let result = manager.create_file_metadata(&format!("/foo"));
+        let result = manager.create_file_metadata(&format!("/foo")).await;
         assert!(result.is_ok());
 
         for i in 0..num_threads {
             let clone = manager.clone();
             let filename = format!("/foo/{i}");
 
-            threads.push(thread::spawn(move || {
-                _ = clone.create_file_metadata(&filename);
-                _ = clone.create_chunk_handle(&filename, 0);
-            }));
-        }
-
-        for thread in threads {
-            _ = thread.join();
+            set.spawn(async move {
+                _ = clone.create_file_metadata(&filename).await;
+                _ = clone.create_chunk_handle(&filename, 0).await;
+            });
         }
 
         let mut unique_handles = HashSet::new();
 
         for i in 0..num_threads {
             let filename = format!("/foo/{i}");
-            assert!(manager.file_metadata_exists(&filename));
+            assert!(manager.file_metadata_exists(&filename).await);
 
-            let result = manager.get_file_metadata(&filename);
+            let result = manager.get_file_metadata(&filename).await;
             assert!(result.is_ok());
 
             let file_metadata = result.unwrap();
@@ -555,14 +554,14 @@ mod tests {
         assert_eq!(unique_handles.len(), num_threads);
     }
 
-    #[test]
-    fn set_and_get_chunk_metadata_works() {
+    #[tokio::test]
+    async fn set_and_get_chunk_metadata_works() {
         let manager = Arc::new(DefaultMetadataManager::new());
         let filename = format!("/key");
-        let result = manager.create_file_metadata(&filename);
+        let result = manager.create_file_metadata(&filename).await;
         assert!(result.is_ok());
 
-        let result = manager.create_chunk_handle(&filename, 0);
+        let result = manager.create_chunk_handle(&filename, 0).await;
         assert!(result.is_ok());
 
         let handle = result.unwrap();
@@ -637,48 +636,42 @@ mod tests {
         );
     }
 
-    #[test]
-    fn file_deletion_works() {
+    #[tokio::test]
+    async fn file_deletion_works() {
         let manager = Arc::new(DefaultMetadataManager::new());
         let num_threads = 100;
         let num_chunks_per_file = 77;
-        let mut threads = Vec::with_capacity(num_threads);
+        let mut set = JoinSet::new();
 
         for i in 0..num_threads {
             let mgr = manager.clone();
             let filename = format!("/{i}");
 
-            threads.push(thread::spawn(move || {
+            set.spawn(async move {
                 for j in 0..num_chunks_per_file {
-                    _ = mgr.create_file_metadata(&filename);
-                    _ = mgr.create_chunk_handle(&filename, j as u32);
+                    _ = mgr.create_file_metadata(&filename).await;
+                    _ = mgr.create_chunk_handle(&filename, j as u32).await;
                 }
-            }));
+            });
         }
 
-        for thread in threads {
-            _ = thread.join();
-        }
+        while let Some(_) = set.join_next().await {}
 
-        let mut threads = Vec::with_capacity(num_threads);
+        let mut set = JoinSet::new();
 
         for i in 0..num_threads {
             let mgr = manager.clone();
             let filename = format!("/{i}");
 
-            threads.push(thread::spawn(move || {
-                _ = mgr.delete_file_and_chunk_metadata(&filename)
-            }));
+            set.spawn(async move { _ = mgr.delete_file_and_chunk_metadata(&filename).await });
         }
 
-        for thread in threads {
-            _ = thread.join();
-        }
+        while let Some(_) = set.join_next().await {}
 
         for i in 0..num_threads {
             let mgr = manager.clone();
             let filename = format!("/{i}");
-            assert!(!mgr.file_metadata_exists(&filename))
+            assert!(!mgr.file_metadata_exists(&filename).await)
         }
     }
 }
