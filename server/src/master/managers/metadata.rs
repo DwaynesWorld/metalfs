@@ -4,8 +4,9 @@ use crate::metalfs::{ChunkMetadata, FileMetadata, StorageServerLocation as Locat
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::vec;
+use tokio::sync::RwLock;
 
 #[async_trait]
 pub trait MetadataManager {
@@ -38,35 +39,40 @@ pub trait MetadataManager {
 
     /// Advance the chunk version number for a chunk handle, return error if
     /// chunk handle not found.
-    fn advance_chunk_version(&self, handle: &String) -> Result<(), MetalFsError>;
+    async fn advance_chunk_version(&self, handle: &String) -> Result<(), MetalFsError>;
 
     /// Check whether chunk metadata exists.
-    fn chunk_metadata_exists(&self, handle: &String) -> bool;
+    async fn chunk_metadata_exists(&self, handle: &String) -> bool;
 
     /// Get the chunk metadata for a given chunk handle, return error if
     /// chunk handle not found.
-    fn get_chunk_metadata(
+    async fn get_chunk_metadata(
         &self,
         handle: &String,
     ) -> Result<Arc<RwLock<ChunkMetadata>>, MetalFsError>;
 
     // Set the chunk metadata for a given chunk handle.
-    fn set_chunk_metadata(&self, data: Arc<RwLock<ChunkMetadata>>);
+    async fn set_chunk_metadata(&self, data: Arc<RwLock<ChunkMetadata>>);
 
     // Delete the chunk metadata for a given chunk handle.
-    fn delete_chunk_metadata(&self, handle: &String);
+    async fn delete_chunk_metadata(&self, handle: &String);
 
     /// Set the primary chunk location that holds the lease for a given chunk
     /// handle, and its lease expiration time.
-    fn set_primary_lease_metadata(&self, handle: &String, location: Location, expiration: u64);
+    async fn set_primary_lease_metadata(
+        &self,
+        handle: &String,
+        location: Location,
+        expiration: u64,
+    );
 
     /// Unset the primary chunk location that holds the lease for a given chunk
     /// handle; this happens when a lease expires / gets revoked.
-    fn remove_primary_lease_metadata(&self, handle: &String);
+    async fn remove_primary_lease_metadata(&self, handle: &String);
 
     /// Return the server location that last held the lease for the handle,
     /// which may or may not be expired; it's up to caller to check the expiration.
-    fn get_primary_lease_metadata(&self, handle: &String) -> Option<(Location, u64)>;
+    async fn get_primary_lease_metadata(&self, handle: &String) -> Option<(Location, u64)>;
 
     /// Assign a new chunk handle. This function returns a unique chunk handle
     /// every time when it gets called.
@@ -129,7 +135,7 @@ impl MetadataManager for DefaultMetadataManager {
             chunks: HashMap::new(),
         }));
 
-        let mut file_metadatas = self.file_metadatas.write().unwrap();
+        let mut file_metadatas = self.file_metadatas.write().await;
         if file_metadatas.contains_key(name) {
             return Err(MetalFsError::FileMetadataAlreadyExists(name.to_owned()));
         }
@@ -140,7 +146,7 @@ impl MetadataManager for DefaultMetadataManager {
     }
 
     async fn file_metadata_exists(&self, name: &String) -> bool {
-        let file_metadatas = self.file_metadatas.read().unwrap();
+        let file_metadatas = self.file_metadatas.read().await;
         file_metadatas.contains_key(name)
     }
 
@@ -156,13 +162,13 @@ impl MetadataManager for DefaultMetadataManager {
         let _file_lock = file_lock.write().await;
 
         let Ok(file_metadata) = self.get_file_metadata(name).await else { return; };
-        let file_metadata = file_metadata.read().unwrap();
+        let file_metadata = file_metadata.read().await;
 
-        let mut file_metadatas = self.file_metadatas.write().unwrap();
+        let mut file_metadatas = self.file_metadatas.write().await;
         file_metadatas.remove(name);
 
         for (_, handle) in file_metadata.chunks.iter() {
-            self.delete_chunk_metadata(handle);
+            self.delete_chunk_metadata(handle).await;
         }
     }
 
@@ -170,7 +176,7 @@ impl MetadataManager for DefaultMetadataManager {
         &self,
         name: &String,
     ) -> Result<Arc<RwLock<FileMetadata>>, MetalFsError> {
-        let file_metadatas = self.file_metadatas.read().unwrap();
+        let file_metadatas = self.file_metadatas.read().await;
         match file_metadatas.get(name) {
             Some(m) => Ok(m.clone()),
             None => Err(MetalFsError::FileMetadataNotFound(name.to_owned())),
@@ -192,7 +198,7 @@ impl MetadataManager for DefaultMetadataManager {
             let _file_lock = file_lock.write().await;
 
             let file_metadata = self.get_file_metadata(name).await?;
-            let mut file_metadata = file_metadata.write().unwrap();
+            let mut file_metadata = file_metadata.write().await;
 
             file_metadata.filename = name.to_owned();
             if file_metadata.chunks.contains_key(&index) {
@@ -209,7 +215,8 @@ impl MetadataManager for DefaultMetadataManager {
             locations: vec![],
         };
 
-        self.set_chunk_metadata(Arc::new(RwLock::new(chunk_metadata)));
+        self.set_chunk_metadata(Arc::new(RwLock::new(chunk_metadata)))
+            .await;
 
         Ok(handle)
     }
@@ -226,17 +233,17 @@ impl MetadataManager for DefaultMetadataManager {
         let _file_lock = file_lock.write().await;
 
         let file_metadata = self.get_file_metadata(name).await?;
-        let file_metadata = file_metadata.read().unwrap();
+        let file_metadata = file_metadata.read().await;
         match file_metadata.chunks.get(&index) {
             Some(m) => Ok(m.clone()),
             None => Err(MetalFsError::ChunkNotFound(index, name.clone())),
         }
     }
 
-    fn advance_chunk_version(&self, handle: &String) -> Result<(), MetalFsError> {
-        let chunk_metadata = self.get_chunk_metadata(handle).unwrap();
+    async fn advance_chunk_version(&self, handle: &String) -> Result<(), MetalFsError> {
+        let chunk_metadata = self.get_chunk_metadata(handle).await.unwrap();
 
-        let mut chunk_metadata_ = chunk_metadata.write().unwrap();
+        let mut chunk_metadata_ = chunk_metadata.write().await;
         chunk_metadata_.version += 1;
         drop(chunk_metadata_);
 
@@ -245,45 +252,50 @@ impl MetadataManager for DefaultMetadataManager {
         todo!()
     }
 
-    fn chunk_metadata_exists(&self, handle: &String) -> bool {
-        let chunk_metadatas = self.chunk_metadatas.read().unwrap();
+    async fn chunk_metadata_exists(&self, handle: &String) -> bool {
+        let chunk_metadatas = self.chunk_metadatas.read().await;
         chunk_metadatas.contains_key(handle)
     }
 
-    fn get_chunk_metadata(
+    async fn get_chunk_metadata(
         &self,
         handle: &String,
     ) -> Result<Arc<RwLock<ChunkMetadata>>, MetalFsError> {
-        let chunk_metadatas = self.chunk_metadatas.read().unwrap();
+        let chunk_metadatas = self.chunk_metadatas.read().await;
         match chunk_metadatas.get(handle) {
             Some(m) => Ok(m.clone()),
             None => Err(MetalFsError::ChunkMetadataNotFound(handle.to_owned())),
         }
     }
 
-    fn set_chunk_metadata(&self, data: Arc<RwLock<ChunkMetadata>>) {
-        let handle = data.read().unwrap().handle.clone();
-        let mut chunk_metadatas = self.chunk_metadatas.write().unwrap();
+    async fn set_chunk_metadata(&self, data: Arc<RwLock<ChunkMetadata>>) {
+        let handle = data.read().await.handle.clone();
+        let mut chunk_metadatas = self.chunk_metadatas.write().await;
         chunk_metadatas.insert(handle, data);
     }
 
-    fn delete_chunk_metadata(&self, handle: &String) {
-        let mut chunk_metadatas = self.chunk_metadatas.write().unwrap();
+    async fn delete_chunk_metadata(&self, handle: &String) {
+        let mut chunk_metadatas = self.chunk_metadatas.write().await;
         chunk_metadatas.remove(handle);
     }
 
-    fn set_primary_lease_metadata(&self, handle: &String, location: Location, expiration: u64) {
-        let mut lease_holders = self.lease_holders.write().unwrap();
+    async fn set_primary_lease_metadata(
+        &self,
+        handle: &String,
+        location: Location,
+        expiration: u64,
+    ) {
+        let mut lease_holders = self.lease_holders.write().await;
         lease_holders.insert(handle.clone(), (location, expiration));
     }
 
-    fn remove_primary_lease_metadata(&self, handle: &String) {
-        let mut lease_holders = self.lease_holders.write().unwrap();
+    async fn remove_primary_lease_metadata(&self, handle: &String) {
+        let mut lease_holders = self.lease_holders.write().await;
         lease_holders.remove(handle);
     }
 
-    fn get_primary_lease_metadata(&self, handle: &String) -> Option<(Location, u64)> {
-        let lease_holders = self.lease_holders.read().unwrap();
+    async fn get_primary_lease_metadata(&self, handle: &String) -> Option<(Location, u64)> {
+        let lease_holders = self.lease_holders.read().await;
         match lease_holders.get(handle) {
             Some(m) => Some(m.clone()),
             None => None,
@@ -317,14 +329,14 @@ mod tests {
         assert!(result.is_ok());
 
         let file_metadata = result.unwrap();
-        assert_eq!(file_metadata.read().unwrap().filename, name);
+        assert_eq!(file_metadata.read().await.filename, name);
 
         let result = manager.create_chunk_handle(&name, 0).await;
         assert!(result.is_ok());
 
         let handle = result.unwrap();
         assert_eq!(handle, String::from("0"));
-        assert_eq!(file_metadata.read().unwrap().chunks.len(), 1);
+        assert_eq!(file_metadata.read().await.chunks.len(), 1);
     }
 
     #[tokio::test]
@@ -385,18 +397,10 @@ mod tests {
             assert!(result.is_ok());
 
             let file_metadata = result.unwrap();
-            assert_eq!(file_metadata.read().unwrap().filename, filename);
-            assert_eq!(file_metadata.read().unwrap().chunks.len(), 1);
+            assert_eq!(file_metadata.read().await.filename, filename);
+            assert_eq!(file_metadata.read().await.chunks.len(), 1);
 
-            unique_handles.insert(
-                file_metadata
-                    .read()
-                    .unwrap()
-                    .chunks
-                    .get(&0)
-                    .unwrap()
-                    .clone(),
-            );
+            unique_handles.insert(file_metadata.read().await.chunks.get(&0).unwrap().clone());
         }
 
         assert_eq!(unique_handles.len(), num_threads);
@@ -444,8 +448,8 @@ mod tests {
         assert!(result.is_ok());
 
         let file_metadata = result.unwrap();
-        assert_eq!(file_metadata.read().unwrap().filename, filename);
-        assert_eq!(file_metadata.read().unwrap().chunks.len(), num_threads);
+        assert_eq!(file_metadata.read().await.filename, filename);
+        assert_eq!(file_metadata.read().await.chunks.len(), num_threads);
 
         let mut unique_handles = HashSet::new();
 
@@ -453,7 +457,7 @@ mod tests {
             unique_handles.insert(
                 file_metadata
                     .read()
-                    .unwrap()
+                    .await
                     .chunks
                     .get(&(i as u32))
                     .unwrap()
@@ -503,7 +507,7 @@ mod tests {
         assert!(result.is_ok());
 
         let file_metadata = result.unwrap();
-        let file_metadata = file_metadata.read().unwrap();
+        let file_metadata = file_metadata.read().await;
         assert_eq!(file_metadata.filename, filename);
         assert_eq!(file_metadata.chunks.len(), num_chunks_per_file);
     }
@@ -537,18 +541,10 @@ mod tests {
             assert!(result.is_ok());
 
             let file_metadata = result.unwrap();
-            assert_eq!(file_metadata.read().unwrap().filename, filename);
-            assert_eq!(file_metadata.read().unwrap().chunks.len(), 1);
+            assert_eq!(file_metadata.read().await.filename, filename);
+            assert_eq!(file_metadata.read().await.chunks.len(), 1);
 
-            unique_handles.insert(
-                file_metadata
-                    .read()
-                    .unwrap()
-                    .chunks
-                    .get(&0)
-                    .unwrap()
-                    .clone(),
-            );
+            unique_handles.insert(file_metadata.read().await.chunks.get(&0).unwrap().clone());
         }
 
         assert_eq!(unique_handles.len(), num_threads);
@@ -590,14 +586,14 @@ mod tests {
         };
 
         let metadata = Arc::new(RwLock::new(metadata));
-        manager.set_chunk_metadata(metadata.clone());
+        manager.set_chunk_metadata(metadata.clone()).await;
 
-        let result = manager.get_chunk_metadata(&handle);
+        let result = manager.get_chunk_metadata(&handle).await;
         assert!(result.is_ok());
 
         let binding = result.unwrap();
-        let metadata_ = binding.read().unwrap();
-        let metadata = metadata.read().unwrap();
+        let metadata_ = binding.read().await;
+        let metadata = metadata.read().await;
 
         assert_eq!(metadata.handle, metadata_.handle);
         assert_eq!(metadata.version, metadata_.version);
