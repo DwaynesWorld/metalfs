@@ -1,9 +1,7 @@
 #![allow(dead_code, unused_variables)]
-
 use crate::metalfs::{StorageServer, StorageServerLocation as Location};
 use async_trait::async_trait;
-use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -19,36 +17,18 @@ impl Hash for Location {
     }
 }
 
-#[derive(Debug)]
-struct MostAvailableDisk(Arc<RwLock<StorageServer>>);
-
-impl PartialEq for MostAvailableDisk {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.blocking_read().available_disk_mb == other.0.blocking_read().available_disk_mb
-    }
-}
-
-impl Ord for MostAvailableDisk {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0
-            .blocking_read()
-            .available_disk_mb
-            .cmp(&other.0.blocking_read().available_disk_mb)
-    }
-}
-
-impl PartialOrd for MostAvailableDisk {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.0
-            .blocking_read()
-            .available_disk_mb
-            .partial_cmp(&other.0.blocking_read().available_disk_mb)
-    }
-}
-
-impl Eq for MostAvailableDisk {}
 impl Eq for StorageServer {}
 impl Eq for Location {}
+
+fn cmp_by_available_disk(
+    item1: &Arc<RwLock<StorageServer>>,
+    item2: &Arc<RwLock<StorageServer>>,
+) -> std::cmp::Ordering {
+    item2
+        .blocking_read()
+        .available_disk_mb
+        .cmp(&item1.blocking_read().available_disk_mb)
+}
 
 #[async_trait]
 pub trait StorageManager {
@@ -65,16 +45,16 @@ pub trait StorageManager {
 
     /// Register the StorageServer with the manager.
     /// Manager can now decide to select it for chunk storage.
-    async fn register_server(&self, server: Arc<StorageServer>) -> bool;
+    async fn register_server(&self, server: Arc<RwLock<StorageServer>>) -> bool;
 
     /// Unregister the StorageServer with the manager.
     /// Manager no longer knows about this server and won't be selected for chunk
     /// storage. This also removes the chunk server from the locations for
     /// previously allocated chunk handles.
-    async fn unregister_server(&self, location: Location) -> bool;
+    async fn unregister_server(&self, location: Location);
 
     /// Returns the StorageServer for the specified location.
-    async fn get_server(&self, location: &Location) -> Option<Arc<StorageServer>>;
+    async fn get_server(&self, location: &Location) -> Option<Arc<RwLock<StorageServer>>>;
 
     /// Update information about a registered storage server. We only allow updating
     /// the available disk and chunks. Location can't be updated since it uniquely
@@ -88,14 +68,15 @@ pub trait StorageManager {
         chunks_to_remove: &HashSet<String>,
     );
 
-    fn get_server_location_map(&self) -> Arc<RwLock<HashMap<Location, Arc<StorageServer>>>>;
+    fn get_server_location_map(&self)
+        -> Arc<RwLock<HashMap<Location, Arc<RwLock<StorageServer>>>>>;
 }
 
 #[derive(Debug)]
 pub(crate) struct DefaultStorageManager {
-    server_locations: Arc<RwLock<HashMap<Location, Arc<StorageServer>>>>,
+    server_locations: Arc<RwLock<HashMap<Location, Arc<RwLock<StorageServer>>>>>,
     chunk_locations: Arc<RwLock<HashMap<String, Arc<RwLock<HashSet<Location>>>>>>,
-    server_queue: Arc<RwLock<BinaryHeap<MostAvailableDisk>>>,
+    priority_server_list: Arc<RwLock<Vec<Arc<RwLock<StorageServer>>>>>,
 }
 
 impl DefaultStorageManager {
@@ -103,7 +84,7 @@ impl DefaultStorageManager {
         Self {
             server_locations: Arc::new(RwLock::new(HashMap::new())),
             chunk_locations: Arc::new(RwLock::new(HashMap::new())),
-            server_queue: Arc::new(RwLock::new(BinaryHeap::new())),
+            priority_server_list: Arc::new(RwLock::new(Vec::new())),
         }
     }
 }
@@ -123,16 +104,16 @@ impl StorageManager for DefaultStorageManager {
         drop(existing);
 
         let mut allocated_locations = HashSet::new();
-        let mut server_queue = self.server_queue.write().await;
+        let mut priority_list = self.priority_server_list.write().await;
 
         for i in 0..replication_cnt {
-            if server_queue.is_empty() {
+            if priority_list.is_empty() {
                 warn!("No storage servers to allocate chunks");
                 break;
             }
 
-            let item = server_queue.peek_mut().unwrap();
-            let mut server = item.0.write().await;
+            let server = priority_list.first().unwrap();
+            let mut server = server.write().await;
 
             if server.location.is_none() {
                 warn!("Found storage server with missing location");
@@ -163,19 +144,20 @@ impl StorageManager for DefaultStorageManager {
             let mut chunk_locations = self.chunk_locations.write().await;
             let allocated_locations = Arc::new(RwLock::new(allocated_locations));
             chunk_locations.insert(handle.to_string(), allocated_locations.clone());
+            priority_list.sort_by(cmp_by_available_disk);
             allocated_locations
         } else {
             Arc::new(RwLock::new(HashSet::new()))
         }
     }
 
-    async fn register_server(&self, server: Arc<StorageServer>) -> bool {
-        if server.location.is_none() {
+    async fn register_server(&self, server: Arc<RwLock<StorageServer>>) -> bool {
+        if server.read().await.location.is_none() {
             info!("Storage server is missing location");
             return false;
         }
 
-        let location = server.location.as_ref().unwrap().clone();
+        let location = server.read().await.location.as_ref().unwrap().clone();
         self.server_locations
             .write()
             .await
@@ -186,21 +168,54 @@ impl StorageManager for DefaultStorageManager {
             location.hostname, location.port
         );
 
-        for handle in server.stored_chunk_handles.as_slice() {
-            match self.chunk_locations.write().await.get(handle) {
+        let chunk_locations = self.chunk_locations.read().await;
+        for handle in server.read().await.stored_chunk_handles.as_slice() {
+            match chunk_locations.get(handle) {
                 Some(s) => s.write().await.insert(location.clone()),
                 None => false,
             };
         }
 
+        let mut priority_list = self.priority_server_list.write().await;
+        priority_list.push(server);
+        priority_list.sort_by(cmp_by_available_disk);
+
         true
     }
 
-    async fn unregister_server(&self, location: Location) -> bool {
-        todo!()
+    async fn unregister_server(&self, location: Location) {
+        let mut server_locations = self.server_locations.write().await;
+
+        // Remove server from server location map if it exist
+        let server = server_locations.remove(&location);
+
+        if server.is_none() {
+            return;
+        }
+
+        info!(
+            "Un-Registered storage server {}:{}",
+            location.hostname, location.port
+        );
+
+        // Remove server from server_queue if it exist
+        let server = server.unwrap();
+        self.priority_server_list
+            .write()
+            .await
+            .retain(|x| x.blocking_read().location.as_ref().unwrap().hostname != location.hostname);
+
+        // Remove server from chunk locations map if it exist
+        let chunk_locations = self.chunk_locations.read().await;
+        for handle in server.read().await.stored_chunk_handles.as_slice() {
+            match chunk_locations.get(handle) {
+                Some(s) => s.write().await.remove(&location),
+                None => false,
+            };
+        }
     }
 
-    async fn get_server(&self, location: &Location) -> Option<Arc<StorageServer>> {
+    async fn get_server(&self, location: &Location) -> Option<Arc<RwLock<StorageServer>>> {
         match self.server_locations.read().await.get(location) {
             Some(s) => Some(s.clone()),
             None => None,
@@ -214,10 +229,48 @@ impl StorageManager for DefaultStorageManager {
         chunks_to_add: &HashSet<String>,
         chunks_to_remove: &HashSet<String>,
     ) {
-        todo!()
+        let server_locations = self.server_locations.read().await;
+        let server = server_locations.get(&location);
+        if server.is_none() {
+            return;
+        }
+
+        info!(
+            "Updating storage server {}:{} with newly reported info",
+            location.hostname, location.port
+        );
+
+        let mut priority_list = self.priority_server_list.write().await;
+        let server = server.unwrap();
+
+        // Remove chunks
+        if !chunks_to_remove.is_empty() {
+            server
+                .write()
+                .await
+                .stored_chunk_handles
+                .retain(|handle| !chunks_to_remove.contains(handle));
+
+            let chunk_locations = self.chunk_locations.read().await;
+            for handle in chunks_to_remove.iter() {
+                match chunk_locations.get(handle) {
+                    Some(s) => s.write().await.remove(&location),
+                    None => false,
+                };
+            }
+        }
+
+        // Add Chunks
+
+        // Update Queue
+
+        // Update priority list
+        priority_list.sort_by(cmp_by_available_disk);
     }
 
-    fn get_server_location_map(&self) -> Arc<RwLock<HashMap<Location, Arc<StorageServer>>>> {
+    fn get_server_location_map(
+        &self,
+    ) -> Arc<RwLock<HashMap<Location, Arc<RwLock<StorageServer>>>>> {
         self.server_locations.clone()
     }
 }
