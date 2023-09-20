@@ -125,9 +125,9 @@ mod tests {
         let manager = Arc::new(InMemoryLockManager::new());
 
         for i in 0..num_threads {
-            let clone = manager.clone();
+            let mgr_ref = manager.clone();
             set.spawn(async move {
-                _ = clone.create_lock(&format!("/{i}")).await;
+                _ = mgr_ref.create_lock(&format!("/{i}")).await;
             });
         }
 
@@ -146,13 +146,13 @@ mod tests {
         let count = Arc::new(AtomicU32::new(0));
 
         for _ in 0..num_threads {
-            let mgr_clone = manager.clone();
-            let cnt_clone = count.clone();
+            let mgr_ref = manager.clone();
+            let cnt_ref = count.clone();
 
             set.spawn(async move {
-                let result = mgr_clone.create_lock(&format!("/key")).await;
+                let result = mgr_ref.create_lock(&format!("/key")).await;
                 if result.is_ok() {
-                    cnt_clone.fetch_add(1, Ordering::SeqCst);
+                    cnt_ref.fetch_add(1, Ordering::SeqCst);
                 }
             });
         }

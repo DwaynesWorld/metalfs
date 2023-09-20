@@ -63,7 +63,7 @@ pub trait StorageManager {
     async fn update_server(
         &self,
         location: &Location,
-        available_disk_mb: Option<u32>,
+        available_disk_mb: u32,
         chunks_to_add: &HashSet<String>,
         chunks_to_remove: &HashSet<String>,
     );
@@ -225,7 +225,7 @@ impl StorageManager for DefaultStorageManager {
     async fn update_server(
         &self,
         location: &Location,
-        available_disk_mb: Option<u32>,
+        available_disk_mb: u32,
         chunks_to_add: &HashSet<String>,
         chunks_to_remove: &HashSet<String>,
     ) {
@@ -254,15 +254,35 @@ impl StorageManager for DefaultStorageManager {
             let chunk_locations = self.chunk_locations.read().await;
             for handle in chunks_to_remove.iter() {
                 match chunk_locations.get(handle) {
-                    Some(s) => s.write().await.remove(&location),
+                    Some(locations) => locations.write().await.remove(&location),
                     None => false,
                 };
             }
         }
 
         // Add Chunks
+        if !chunks_to_add.is_empty() {
+            let mut server = server.write().await;
+            let mut chunk_locations = self.chunk_locations.write().await;
+            for handle in chunks_to_add.iter() {
+                server.stored_chunk_handles.push(handle.clone());
+                match chunk_locations.get(handle) {
+                    Some(locations) => {
+                        locations.write().await.insert(location.clone());
+                    }
+                    None => {
+                        let mut locations = HashSet::new();
+                        locations.insert(location.clone());
+                        chunk_locations.insert(handle.to_owned(), Arc::new(RwLock::new(locations)));
+                    }
+                };
+            }
+        }
 
         // Update Queue
+        let mut server = server.write().await;
+        server.available_disk_mb = available_disk_mb;
+        drop(server);
 
         // Update priority list
         priority_list.sort_by(cmp_by_available_disk);

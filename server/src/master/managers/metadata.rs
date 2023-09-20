@@ -376,12 +376,12 @@ mod tests {
         let manager = Arc::new(DefaultMetadataManager::new());
 
         for i in 0..num_threads {
-            let clone = manager.clone();
+            let mgr_ref = manager.clone();
             let filename = format!("/{i}");
 
             set.spawn(async move {
-                _ = clone.create_file_metadata(&filename).await;
-                _ = clone.create_chunk_handle(&filename, 0).await;
+                _ = mgr_ref.create_file_metadata(&filename).await;
+                _ = mgr_ref.create_chunk_handle(&filename, 0).await;
             });
         }
 
@@ -415,14 +415,14 @@ mod tests {
         let filename = format!("/key");
 
         for _ in 0..num_threads {
-            let mgr_clone = manager.clone();
-            let cnt_clone = count.clone();
-            let fname_clone = filename.clone();
+            let mgr_ref = manager.clone();
+            let cnt_ref = count.clone();
+            let filename_ref = filename.clone();
 
             set.spawn(async move {
-                let result = mgr_clone.create_file_metadata(&fname_clone).await;
+                let result = mgr_ref.create_file_metadata(&filename_ref).await;
                 if result.is_ok() {
-                    cnt_clone.fetch_add(1, Ordering::SeqCst);
+                    cnt_ref.fetch_add(1, Ordering::SeqCst);
                 }
             });
         }
@@ -434,11 +434,11 @@ mod tests {
         let mut set = JoinSet::new();
 
         for i in 0..num_threads {
-            let mgr_clone = manager.clone();
-            let fname_clone = filename.clone();
+            let mgr_ref = manager.clone();
+            let filename_ref = filename.clone();
 
             set.spawn(async move {
-                let _ = mgr_clone.create_chunk_handle(&fname_clone, i as u32).await;
+                let _ = mgr_ref.create_chunk_handle(&filename_ref, i as u32).await;
             });
         }
 
@@ -482,15 +482,15 @@ mod tests {
         let mut set = JoinSet::new();
 
         for _ in 0..num_threads {
-            let mgr = manager.clone();
-            let count = err_count.clone();
-            let fname = filename.clone();
+            let mgr_ref = manager.clone();
+            let err_count_ref = err_count.clone();
+            let filename_ref = filename.clone();
 
             set.spawn(async move {
                 for i in 0..num_chunks_per_file {
-                    let result = mgr.create_chunk_handle(&fname, i as u32).await;
+                    let result = mgr_ref.create_chunk_handle(&filename_ref, i as u32).await;
                     if result.is_err() {
-                        count.fetch_add(1, Ordering::SeqCst);
+                        err_count_ref.fetch_add(1, Ordering::SeqCst);
                     }
                 }
             });
@@ -521,12 +521,12 @@ mod tests {
         assert!(result.is_ok());
 
         for i in 0..num_threads {
-            let clone = manager.clone();
+            let mgr_ref = manager.clone();
             let filename = format!("/foo/{i}");
 
             set.spawn(async move {
-                _ = clone.create_file_metadata(&filename).await;
-                _ = clone.create_chunk_handle(&filename, 0).await;
+                _ = mgr_ref.create_file_metadata(&filename).await;
+                _ = mgr_ref.create_chunk_handle(&filename, 0).await;
             });
         }
 
@@ -641,13 +641,13 @@ mod tests {
         let mut set = JoinSet::new();
 
         for i in 0..num_threads {
-            let mgr = manager.clone();
+            let mgr_ref = manager.clone();
             let filename = format!("/{i}");
 
             set.spawn(async move {
                 for j in 0..num_chunks_per_file {
-                    _ = mgr.create_file_metadata(&filename).await;
-                    _ = mgr.create_chunk_handle(&filename, j as u32).await;
+                    _ = mgr_ref.create_file_metadata(&filename).await;
+                    _ = mgr_ref.create_chunk_handle(&filename, j as u32).await;
                 }
             });
         }
@@ -657,18 +657,18 @@ mod tests {
         let mut set = JoinSet::new();
 
         for i in 0..num_threads {
-            let mgr = manager.clone();
+            let mgr_ref = manager.clone();
             let filename = format!("/{i}");
 
-            set.spawn(async move { _ = mgr.delete_file_and_chunk_metadata(&filename).await });
+            set.spawn(async move { _ = mgr_ref.delete_file_and_chunk_metadata(&filename).await });
         }
 
         while let Some(_) = set.join_next().await {}
 
         for i in 0..num_threads {
-            let mgr = manager.clone();
+            let mgr_ref = manager.clone();
             let filename = format!("/{i}");
-            assert!(!mgr.file_metadata_exists(&filename).await)
+            assert!(!mgr_ref.file_metadata_exists(&filename).await)
         }
     }
 }
