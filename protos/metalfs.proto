@@ -126,21 +126,22 @@ service MasterReportingService {
   // and the master replies with the identity of all chunks that are
   // no longer present in the master’s metadata, as well as the reported
   // chunks with stale version.
-  rpc ReportChunk(ReportChunkRequest) returns (ReportChunkResponse) {}
+  rpc ReportStorageServer(ReportStorageServerRequest)
+      returns (ReportStorageServerResponse) {}
 }
 
 // Server type has list of handles, and we are using stored_chunks here
 // again for handle to version mapping.
-message ReportChunkRequest {
+message ReportStorageServerRequest {
   // The storage server making this request.
   StorageServer storage_server = 1;
   // All the chunks stored on the storage server.
   repeated ChunkMetadata stored_chunks = 2;
 }
 
-message ReportChunkResponse {
+message ReportStorageServerResponse {
   // The original request associated with this reply.
-  ReportChunkRequest request = 1;
+  ReportStorageServerRequest request = 1;
   // The chunks reported by the storage server that the master considers to be
   // stale. This allows the storage server to delete them.
   repeated string stale_chunk_handles = 2;
